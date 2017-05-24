@@ -1,0 +1,44 @@
+---
+title: "Comparing GWAS models"
+author: "Brandon Mapes"
+date: "5/24/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{bash, echo=FALSE}
+###Create list of top 100k SNPs sorted by p-val (column 8 -> k8)
+
+#cat Imputed_RIKENcombined1-2_MAF0.01_INFO1.05biTINN_Age.noise.CumlCispdose.10PCs_chr1-22.assoc.dosage | sort -k8 -n | head -100000 >> Imputed_RIKENcombined1-2_MAF0.01_INFO1.05biTINN_Age.noise.CumlCispdose.10PCs_1-22.assoc.dosage.sort.top100000
+```
+
+
+```{r, echo=FALSE}
+###Creat a scatter-plot comparing top 100k SNPs of two GWAS models of binary tinnitus response; one using noise-exposure as a covariate, one without. (other covariates: age, cumulative cisplatin dose, and principle components 1-10)
+
+library(dplyr)
+
+"%&%" = function(a,b) paste(a,b,sep="")
+#my.dir = "/Volumes/dolan-lab/Tinnitus/GWAS/GWASresults"
+my.dir = "Desktop/"
+
+##Read in top SNPs from each model
+NoNOIScovar <- "Imputed_RIKENcombined1-2_MAF0.01_INFO1.05biTINN_Age.CumlCispdose.10PCs_chr1-22.assoc.dosage.sorted.top100000"
+wNOIScovar <- "Imputed_RIKENcombined1-2_MAF0.01_INFO1.05biTINN_Age.noise.CumlCispdose.10PCs_chr1-22.assoc.dosage.sorted.top100000"
+
+NoNOIS = read.table(my.dir %&% NoNOIScovar , header = T,stringsAsFactors = F)
+wNOIS = read.table(my.dir %&% wNOIScovar , header = T,stringsAsFactors = F)
+
+##Remove excess data
+NoNOIS <- NoNOIS[,(seq(2:7))]
+wNOIS <- wNOIS[,(seq(2:7))]
+##Join both tables by SNP rsID
+combo <- left_join(NoNOIS, wNOIS, by = "SNP")
+
+##Plot data
+plot(-log10(combo$P.x), -log10(combo$P.y), col = "red", xlab = "-log10(p) w/o noise exposure covariate", ylab = "-log10(p) w/ noise exposure covariate", main =  "Tinnitus GWAS Top 100k SNPs by p-val")
+abline(0,1)
+```
