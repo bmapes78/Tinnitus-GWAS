@@ -1,5 +1,6 @@
 # Tinnitus-GWAS
-$$ Ordered list of GWAS scripts $$
+| File Header | Description |
+| -----------:| -----------:|
 ### 01 — Plink execution [PLINK]
 ### 02 — Plink permutations [R]
 ### 02B — Ordinal Regression [R]
