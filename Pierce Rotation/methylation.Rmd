@@ -1,0 +1,326 @@
+---
+title: "ReFACTor"
+author: "Brandon Mapes"
+date: "August 2, 2016"
+output: html_document
+---
+
+```{r}
+#Reference free analysis with ReFACTor
+setwd("~/Desktop")
+source("refactor-master/R/refactor.R")
+k <- 5
+datafile <- "methylation_cytokines_for_student/methylation/ecombat_digit3_tab.txt"
+results <- refactor(datafile,k)
+RC <- results$refactor_components # Extract the ReFACTor components
+ranked_list <- results$ranked_list # Extract the list of sites ranked by ReFACTor
+
+data.adj <- matrix(nrow = nrow(datafile), ncol = ncol(datafile))
+for (i in 1:length(colnames(datafile))) {
+    fit <- lm(datafile[,i] ~ RC)
+    expression[,i] <- fit$residuals
+  }
+}
+```
+
+```{r}
+#ReFACTor with covariates:
+
+# Prepare Covariates File
+covar <- read.table("methylation_cytokines_for_student/methylation/pheno_methylation_samples.txt", header = TRUE)
+# Remove 'cohort' and 'batch' as covariates as all are the same value
+covar <- covar[,-5]
+covar <- covar[,-5]
+# Save as txt file w/o row/column names
+write.table(covar, file = "methylation_cytokines_for_student/methylation/pheno_methylation_samples.txt", row.names = FALSE, col.names = FALSE)
+
+#Need to double check that data participants are in same order as covariate participants.
+
+# Perform analysis
+results <- refactor(datafile,k,covarfile="methylation_cytokines_for_student/methylation/pheno_methylation_samples.txt",t=500,numcomp=10,stdth=0.01,out="BEST_Meth_Results")
+```
+
+```{r}
+#Parsing original data for analysis
+
+#Read cytokine levels (independent variable)
+covar <- read.csv("methylation_cytokines_for_student/cytokines/cyto.csv",stringsAsFactors = FALSE, header = TRUE)
+#create a matrix of cytokines only
+cyto <- cbind(covar[,3], covar[,12:30])
+#Change "." to "NA"
+cyto[cyto == '.'] <- NA
+#Same for covar while we're at it:
+covar[covar == '.'] <- NA
+#Remove uneeded data from covar:
+covar <- covar[,-(1:2)]
+
+
+#Find intersection of cytokine levels participants and methylation data participants
+data_full <- read.table("methylation_cytokines_for_student/methylation/ecombat_digit3_tab.txt", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+#Save vector of intersection
+cyto.filter <- intersect(cyto[,1], colnames(data_full))
+#Parse keeping filtered data
+cyto.parsed <- cyto[cyto[,1] %in% cyto.filter,]
+#Rename rows
+row.names(cyto.parsed) <- cyto.parsed[,1]
+cyto.parsed <- cyto.parsed[,-1]
+#reorder based on order of cyto.filter:
+cyto.parsed <- cyto.parsed[match(cyto.filter, row.names(cyto.parsed)),]
+
+#Parse keeping filtered data
+covar.parsed <- covar[covar[,1] %in% cyto.filter,]
+#Rename rows
+row.names(covar.parsed) <- covar.parsed[,1]
+covar.parsed <- covar.parsed[,-1]
+#reorder based on order of cyto.filter:
+covar.parsed <- covar.parsed[match(cyto.filter, row.names(covar.parsed)),]
+
+#Parse the full data set similarly:
+data.parsed <- matrix(data = NA, nrow = nrow(data_full), ncol = length(cyto.filter))
+for (i in 1:length(cyto.filter)){
+  data.parsed[,i] <- data_full[,cyto.filter[i]]
+}
+row.names(data.parsed) <- data_full[,1]
+colnames(data.parsed) <- cyto.filter
+
+#Convert m-values back to betas if necessary (inverse logit transformation):
+library(boot)
+data.beta <- inv.logit(data.parsed)
+
+###test <- RefFreeEwasModel(covar.parsed, data.beta, k)
+
+###IL19 <- matrix(data = NA, nrow = nrow(data.parsed), ncol = ncol(data.parsed)) 
+  ###for (i in 1:nrow(data.parsed)){
+            ###IL19[i,] <- lm(data.parsed[i,] ~ covar.parsed[,19])
+            ###}
+```
+
+```{r}
+#Find NAs in cytokine data
+cyto.na <- sapply(covar.parsed[,9:27], function(x) which(is.na(x)))
+
+#Find NAs in methylation data
+data.row.na <- c()
+for (i in 1:ncol(f)){
+data.row.na[i] <- sapply(f[,i], function(x) sum(length(which(is.na(x)))))
+}
+```
+
+```{r}
+library(RefFreeEWAS)
+
+#Set variables for specific EWAS (in this case global methylation vs. IL6 levels)
+Y <- data.beta
+rownames(Y) <- rownames(data.beta)
+colnames(Y) <- colnames(data.beta)
+#Note removing this is due to an NA value for IL-6 in a specific individual. NA values will need to be checked and removed for each cytokine based on measuered levels.
+pred <- covar.parsed[,19]
+pred <- as.numeric(pred)
+
+#Note: removing this is due to an NA value for IL-6 in a specific individual. NA values will need to be checked and removed for each cytokine. Based on cyto.na we must remove 70130000 from both dataframes:
+pred <- pred[-1,]
+pred <- matrix(pred, nrow = 399, ncol = 1)
+rownames(pred) <- rownames(covar.parsed[-1,])
+Y <- Y[,-1]
+
+#Create a linear model of methylation matrix (transposed) regreesed on predictor (in this case circulating cytokine level)
+tmp1 <- lm(t(Y) ~ pred)
+
+#Estimate dimensions by RMT (Random Matrix Theory) with isva package. This will be K:
+dim3 <- EstDimRMT(cbind(t(coef(tmp1)), t(resid(tmp1))), plot =FALSE)$dim
+
+#Perform reference free EWAS model
+test <- RefFreeEwasModel(Y, cbind(1, as.numeric(pred)-1), dim3)
+
+#Perform Bootstrap for Reference-Free EWAS Model on 'test':
+testBoot <- BootRefFreeEwasModel(test, 50)
+
+#Output summary of above:
+res <- summary(testBoot)
+
+#Save specifics of summary
+est <- res[, 2, 1, 'mean']
+
+#Save specific standard deviation from summary:
+est.sd <- res[, 2, 1, 'sd']
+
+#Calcualte 
+Q2 <- (est/est.sd)^2
+
+#Inflation factor
+median(Q2, na.rm = TRUE)/qf(0.5, 1, dof) 
+
+#Calculate p-values
+P0 <- 2*exp(pt(-sqrt(Q2), dof, log.p=T)) 
+
+#Create QQ-plot
+qqplot1.pvals(P0)
+```
+
+```{r}
+#Running the different cell type adjustment methods on the simulated beta value matrix
+
+#Loading the simulated data from the main simulation scenario.  One could also load one of the other .RData files corresponding to other
+#simulation scenarios.
+# Data for simulation scenarios can be found at https://zenodo.org/record/34128#.VlMy8WSrSRs
+# sim_beta is the matrix of simulated beta values (probes x samples).
+# disease_status is a vector with the phenotype (0=control, 1=case, except in the continuous scenario dataset)
+# true_disease is a character vector with the original patient disease status (data from before simulation).  This is coded to levels D1 through D5.
+# dmr contains the indices of CpGs that were simulated to be differentially methylated with the phenotype
+
+load("simulated_data.RData")
+
+#Random sample of data to speed up demonstration, if desired
+set.seed(24601)
+nprobes = 50000
+rs = sample(1:nrow(sim_beta), nprobes)
+sim_beta = sim_beta[rs,]
+dmr = dmr[dmr %in% rs]
+
+###################################################
+#Model not adjusting for cell type
+library(limma)
+X.unadj = model.matrix(~pred)
+lm.unadj = eBayes(lmFit(Y, X.unadj))
+p.unadj = lm.unadj$p.value[,2]
+
+###################################################
+#Code for reference-based and reference-free methods based on Houseman tutorial 2014
+#http://people.oregonstate.edu/~housemae/software/TutorialLondon2014/
+###################################################
+#Reference-based method: http://bioconductor.org/packages/release/bioc/html/minfi.html
+
+library(minfi)
+library(FlowSorted.Blood.450k)
+data(FlowSorted.Blood.450k.JaffeModelPars)
+commondmr <- intersect(rownames(FlowSorted.Blood.450k.JaffeModelPars), rownames(sim_beta))
+
+
+#Directly estimating cell type composition
+cellcomps = minfi:::projectCellType(sim_beta[commondmr,], FlowSorted.Blood.450k.JaffeModelPars[commondmr,], lessThanOne=TRUE)
+
+X.ref = model.matrix(~disease_status+cellcomps)
+lm.ref = eBayes(lmFit(sim_beta, X.ref))
+p.ref = lm.ref$p.value[,2]
+
+###################################################
+#Reference-free method:  https://cran.r-project.org/web/packages/RefFreeEWAS/index.html
+library(RefFreeEWAS)
+
+#Estimated latent dimension
+est_dim = EstDimRMT(t(scale(t(sim_beta - lm.unadj$coef %*% t(X.unadj)))), plot=FALSE)$dim
+#Main function
+mod = RefFreeEwasModel(sim_beta, cbind(1,disease_status), K=est_dim)
+nboot = 100 #Number of bootstrap samples to obtain standard errors
+boot = BootRefFreeEwasModel(mod, nboot)
+#Extracting standard errors and calculating test statistic
+se = apply(boot[,,"B",], 1:2, sd)
+ts = abs(mod$Beta)/se
+
+df = -diff(dim(model.matrix(~disease_status)))-apply(is.na(sim_beta),1,sum)
+p.reffree = 2*pt(ts[,2], df=df, lower.tail=FALSE)
+
+###################################################
+#Surrogate variable analysis: https://www.bioconductor.org/packages/release/bioc/html/sva.html
+library(sva)
+
+#Null model matrix must be nested in the full model matrix
+model_mat = model.matrix(~disease_status)
+null_model_mat = model.matrix(~1, data.frame(disease_status))
+
+#Main SVA function
+SVA = sva(sim_beta, model_mat, null_model_mat, method="irw")
+
+#Calculate p-values
+update_model = cbind(model_mat, SVA$sv)
+update_null_model = cbind(null_model_mat, SVA$sv)
+p.sva = f.pvalue(sim_beta, update_model, update_null_model)
+
+###################################################
+#Independent Surrogate Variable Analysis: https://cran.fhcrc.org/web/packages/isva/index.html
+library(isva)
+
+ISVA = DoISVA(sim_beta, matrix(disease_status))
+p.isva = ISVA$spv
+
+###################################################
+#Deconfounding: http://web.cbio.uct.ac.za/~renaud/CRAN/
+library(deconf)
+
+#Running deconfounding on subset to speed up demonstration
+sampdec = sample(length(sim_beta[,1]), 1000)
+tmpdec = deconfounding(sim_beta[sampdec,],3)
+
+X.tmpdec = model.matrix(~disease_status+t(tmpdec$C$Matrix))
+lm.tmpdec = eBayes(lmFit(sim_beta, X.tmpdec))
+p.dec = lm.tmpdec$p.value[,2]
+
+##################################################
+#RUV: https://cran.r-project.org/web/packages/ruv/index.html
+library(ruv)
+
+#Choosing Jaffe CpG sites to be control probes for ruv
+ruv_controls = which(rownames(sim_beta) %in% rownames(FlowSorted.Blood.450k.JaffeModelPars))
+#Taking only the controls that do not correlate with the phenotype
+subset_controls = ruv_controls[lm.unadj$p.value[ruv_controls,2]>0.01]
+#Turning control probe vector into logical
+ctl = rep(FALSE, dim(sim_beta)[1]); ctl[subset_controls] = TRUE
+
+#getK estimates the latent dimension, but for this dataset it ends up being much too high
+ruvK = getK(t(sim_beta), matrix(disease_status), ctl)$k
+ruv_mod = RUV4(t(sim_beta), matrix(disease_status), ctl, k=ruvK)
+p.ruv = ruv_mod$p
+
+##################################################
+#EWASher and CellCDecon need to be run externally... For EWASher, run the script "run_ewasher.sh", and for 
+#CellCDecon run the script "run_cellcdecon.sh". For both methods use the text files generated below as the input.
+
+#EWASher http://research.microsoft.com/en-us/downloads/472fe637-7cb9-47d4-a0df-37118760ccd1/
+#CellCDecon https://github.com/jameswagner/CellCDecon
+
+#Function to save data to text files for use in EWASher and CellCDecon 
+makefiles_FLE = function(rSrcDir, data, phen, covar)
+{        
+  #write each input to file, then call RunFLEFromFiles
+  write.table(data, file = "datafileTmp.txt", col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE)
+  write.table(phen, file = "phenfileTmp.txt", col.names = FALSE, row.names = FALSE, sep = "\t", quote = FALSE)
+  write.table(covar, file = "covarfileTmp.txt", col.names = FALSE, row.names = FALSE, sep = "\t", quote = FALSE)
+}
+
+#Need to manipulate beta matrix to what EWASher and CCD expect
+tmp_beta = data.frame(rownames(sim_beta), sim_beta)
+colnames(tmp_beta) = c("ID", colnames(sim_beta))
+
+#Directory to output files to
+path_to_dir = "/home/data1/homeldi/kevin.mcgregor/research/marie_hudson/r_scripts/mixtures/github_tutorial"
+
+#Make the EWASher input files, only phenotype (no covariates).  The beta matrix file is used for
+# CellCDecon as well
+makefiles_FLE(path_to_dir, tmp_beta, data.frame(colnames(tmp_beta)[-1], disease_status), covar=NULL) 
+
+#Or save another version with patients' true disease (coded) from original 450K data before simulation
+#as a covariate to compare performance of EWASher with/without the extra covariates
+makefiles_FLE(path_to_dir, tmp_beta, 
+              data.frame(colnames(tmp_beta)[-1], disease_status),
+              data.frame(1, colnames(tmp_beta[-1]), 1*(true_disease=="D1"), 1*(true_disease=="D2"),
+                         1*(true_disease=="D3"), 1*(true_disease=="D4"), 1*(true_disease=="D5")) )  
+
+
+####################################################
+#Generating qqplots for p-values for the different methods
+library(qqman)
+
+qq(p.unadj)
+qq(p.ref)
+qq(p.reffree)
+qq(p.sva)
+qq(p.isva)
+qq(p.dec)
+qq(p.ruv)
+
+#CellCDecon and EWASher could be plotted as well if the p-values were loaded back into the workspace after running the methods externally.
+
+
+
+
+```

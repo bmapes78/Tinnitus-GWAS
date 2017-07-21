@@ -1,0 +1,98 @@
+---
+title: "Normalizing Matrixeqtl Expression w/ Peer Factors"
+author: "Brandon Mapes"
+date: "July 6, 2016"
+output: html_document
+---
+
+```{r}
+#Converting matrixeqtl expression + peer factors to normalized expression values
+
+#Un-hash below for command-line settings
+#argv <- commandArgs(trailingOnly = TRUE)
+#"Desktop/miRNA_matrixeqtl_CTR_202_log2_runif_final1" <- argv[1]
+#"Desktop/miRNA_CTR_Exp" <- argv[2]
+
+# Input file has header as people ids, 1st col is gene_id.  Want transposed.
+expression <- read.table("Desktop/miRNA_matrixeqtl_CTR_202_log2_runif_final1", stringsAsFactors = FALSE, header = TRUE, row.names = 1, check.names = FALSE)
+expression <- t(expression)
+
+# Presence of covariate file suggests to correct for PEER factors, etc.
+
+#Create empty set to store residuals
+exp <- matrix(nrow = length(expression[,1]), ncol = length(expression[1,]))
+
+#Un-hash below for command-line
+#if (length(argv == 3)) {
+  #"Desktop/miRNA_matrixeqtl_CTR_log2_120P_50perc_runif_final1" <- argv[3]
+  covariate <- read.table("Desktop/miRNA_matrixeqtl_CTR_log2_120P_50perc_runif_final1", stringsAsFactors = FALSE, header = TRUE, row.names = 1, check.names = FALSE)
+  covariate <- t(covariate)
+  
+  for (i in 1:length(colnames(expression))) {
+    fit <- lm(expression[,i] ~ covariate, na.action = na.exclude)
+    exp[,i] <- as.vector(residuals(fit))
+  }
+#}
+
+#Swap column and row names from raw expression file  
+colnames(exp) <- colnames(expression)
+rownames(exp) <- rownames(expression)  
+
+#Save file for pipeline
+saveRDS(exp, file = "Desktop/miRNA_CTR_Exp", ascii = TRUE, compress = FALSE)
+```
+
+
+#Need to determine expression value least equal to zero between 3p and 5p arms of pre-miRs
+#First create a matrix of miR names to find the miRs complimentary arms (I used Excel after creating the following matrix):
+miRs <- colnames(exp)
+miRs <- as.matrix(miRs)
+write(miRs, file = "Desktop/miRs")
+#Now after identifying miRs with two arms (both 3p and 5p), create a vector with only those names:
+miRs2 <- c(miR_106b_3p, miR_106b_5p, miR_126_3p, miR_126_5p, miR_1271_5p_b1, miR_1271_5p_b2, miR_1291_b1, miR_1291_b2, miR_130b_3p, miR_130b_5p, miR_139_3p, miR_139_5p, miR_142_3p, miR_142_5p, miR_146b_3p, miR_146b_5p, miR_151a_3p, miR_151a_5p, miR_15b_3p, miR_15b_5p, miR_16_1_3p, miR_16_5p, miR_181a_2_3p, miR_181a_5p, miR_186_5p_a1, miR_186_5p_a2, miR_18a_5p_a1, miR_18a_5p_a2, miR_191_3p, miR_191_5p, miR_192_3p, miR_192_5p, miR_19b_1_5p, miR_19b_3p, miR_20a_3p, miR_20a_5p, miR_20b_3p, miR_20b_5p, miR_22_3p, miR_22_5p, miR_223_3p, miR_223_5p, miR_24_2_5p, miR_24_3p, miR_25_3p, miR_25_5p, miR_26a_1_3p, miR_26a_5p, miR_26b_3p, miR_26b_5p, miR_27a_3p, miR_27a_5p, miR_28_3p, miR_28_5p, miR_29c_3p, miR_29c_5p, miR_324_3p, miR_324_5p, miR_339_3p, miR_339_5p, miR_363_3p, miR_363_5p, miR_454_3p, miR_454_5p, miR_500a_3p, miR_500a_5p, miR_502_3p, miR_502_5p, miR_505_3p, miR_505_5p, miR_532_3p, miR_532_5p, miR_589_3p, miR_589_5p, miR_616_3p, miR_616_5p, miR_625_3p, miR_625_5p, miR_629_3p, miR_629_5p, miR_7_1_3p, miR_7_5p, miR_744_3p, miR_744_5p, miR_766_3p, miR_769_5p, miR_93_3p, miR_93_5p)
+#create a new matrix containing only these values:
+exp2 <- exp[,miRs2]
+
+#create a loop to extract the value least equal to zero for each arm throuout all individuals:
+MAXmir <- matrix(nrow = 5134, ncol = 44)
+for (i in seq(1, length(colnames(exp2)), 2)) {
+    if (abs(exp2[i])>abs(exp2[i+1]))  {MAXmiR[i] <- exp2[i]}
+    else                              {MAXmir[i] <- exp2[i+1]}
+}
+
+
+```{r}
+#rename to match annotation file (format example: MIR123A)
+#1)remove underscores, 2)capitalize MIR,  3)remove 3p or 5p 4)capitalize A or B if necessary:
+miRs <- colnames(exp)
+miRs <- as.matrix(miRs)
+
+
+miRs <- gsub("_1", "-1", miRs)
+miRs <- gsub("_2", "-2", miRs)
+miRs <- gsub("_", "", miRs)
+miRs <- gsub("mi","MI", miRs)
+miRs <- gsub("3p", "_3p", miRs)
+miRs <- gsub("5p", "_5p", miRs)
+miRs <- gsub("3pa", "3pX", miRs)
+miRs <- gsub("3pb", "3pY", miRs)
+miRs <- gsub("5pa", "5pX", miRs)
+miRs <- gsub("5pb", "5pY", miRs)
+miRs <- gsub("a", "A", miRs)
+miRs <- gsub("b", "B", miRs)
+miRs <- gsub("c", "C", miRs)
+miRs <- gsub("d", "D", miRs)
+miRs <- gsub("e", "E", miRs)
+#Remove few specific exceptions of alternate transcript indicators: e.g miR_16_1_3p -> MIR16:
+miRs <- gsub("161", "16", miRs) #miR_16_1_3p
+miRs <- gsub("A2", "A", miRs) #miR_181a_2_3p
+#miRs <- gsub("B1", "B", miRs) #miR_19b_1_ 5p
+#miRs <- gsub("B2", "B", miRs) #miR_19b_2_ 5p
+miRs <- gsub("242", "24", miRs) #miR_24_2_5p
+#miRs <- gsub("A1", "A", miRs) #miR_26a_1_3p
+#Remove the lone "hsa":
+miRs <- gsub("hsA", "", miRs)
+
+colnames(exp) <- miRs
+saveRDS(exp, file = "Desktop/miRNA_CTR_Exp", ascii = TRUE, compress = FALSE)
+```
